@@ -1,178 +1,163 @@
-//
-//  SegmentedProgressBar.swift
-//  Vought Showcase
-//
-//  Created by Burhanuddin Rampurawala on 07/08/24.
-//
-
-import Foundation
 import UIKit
 
-/// A delegate protocol for handling SegmentedProgressBar events.
 protocol SegmentedProgressBarDelegate: AnyObject {
-    /// Called when the progress bar changes to a new segment.
-    /// - Parameter index: The index of the new active segment.
     func segmentedProgressBarChangedIndex(index: Int)
-    
-    /// Called when the progress bar finishes animating all segments.
     func segmentedProgressBarFinished()
 }
 
-/// A custom UIView subclass that displays a segmented progress bar with animated filling.
-class SegmentedProgressBar: UIView {
+final class SegmentedProgressBar: UIView {
+    // MARK: - Properties
+    private var totalSegments: Int
+    private var duration: TimeInterval
+    private var currentIndex: Int = 0
+    private var backgroundBars: [UIView] = []
+    private var foregroundBars: [UIView] = []
+    private var widthConstraints: [NSLayoutConstraint] = []
     
-    /// The delegate to receive progress bar events.
     weak var delegate: SegmentedProgressBarDelegate?
     
-    /// The color of the filled portion of each segment.
-    var topColor = UIColor.white {
-        didSet {
-            self.updateColors()
-        }
-    }
-    
-    /// The color of the unfilled portion of each segment.
-    var bottomColor = UIColor.gray.withAlphaComponent(0.25) {
-        didSet {
-            self.updateColors()
-        }
-    }
-    
-    /// The padding between segments.
-    var padding: CGFloat = 4.0
-    
-    /// A boolean indicating whether the progress bar animation is paused.
-    var isPaused: Bool = false {
-        didSet {
-            if isPaused {
-                for segment in segments {
-                    let layer = segment.topSegmentView.layer
-                    let pausedTime = layer.convertTime(CACurrentMediaTime(), from: nil)
-                    layer.speed = 0.0
-                    layer.timeOffset = pausedTime
-                }
-            } else {
-                let segment = segments[currentAnimationIndex]
-                let layer = segment.topSegmentView.layer
-                let pausedTime = layer.timeOffset
-                layer.speed = 1.0
-                layer.timeOffset = 0.0
-                layer.beginTime = 0.0
-                let timeSincePause = layer.convertTime(CACurrentMediaTime(), from: nil) - pausedTime
-                layer.beginTime = timeSincePause
-            }
-        }
-    }
-    
-    private var segments = [Segment]()
-    private let duration: TimeInterval
-    private var hasDoneLayout = false
-    private var currentAnimationIndex = 0
-    
-    /// Initializes a new SegmentedProgressBar with the specified number of segments and duration.
-    /// - Parameters:
-    ///   - numberOfSegments: The number of segments in the progress bar.
-    ///   - duration: The duration of each segment's animation. Defaults to 5.0 seconds.
-    init(numberOfSegments: Int, duration: TimeInterval = 5.0) {
+    // MARK: - Init
+    init(numberOfSegments: Int, duration: TimeInterval) {
+        self.totalSegments = numberOfSegments
         self.duration = duration
-        super.init(frame: CGRect.zero)
-        
-        for _ in 0..<numberOfSegments {
-            let segment = Segment()
-            addSubview(segment.bottomSegmentView)
-            addSubview(segment.topSegmentView)
-            segments.append(segment)
-        }
-        self.updateColors()
+        super.init(frame: .zero)
+        setupSegments()
     }
     
-    required init?(coder aDecoder: NSCoder) {
+    required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+    
+    // MARK: - Setup
+    private func setupSegments() {
+        let spacing: CGFloat = 5
+        backgroundBars.removeAll()
+        foregroundBars.removeAll()
+        widthConstraints.removeAll()
+        
+        for i in 0..<totalSegments {
+            let bg = UIView()
+            bg.backgroundColor = UIColor.white.withAlphaComponent(0.3) // Gray background
+            bg.layer.cornerRadius = 2
+            bg.clipsToBounds = true
+            bg.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(bg)
+            backgroundBars.append(bg)
+            
+            let fg = UIView()
+            fg.backgroundColor = .white // White progress
+            fg.layer.cornerRadius = 2
+            fg.clipsToBounds = true
+            fg.translatesAutoresizingMaskIntoConstraints = false
+            bg.addSubview(fg)
+            foregroundBars.append(fg)
+            
+            let fgWidthConstraint = fg.widthAnchor.constraint(equalTo: bg.widthAnchor, multiplier: 0)
+            widthConstraints.append(fgWidthConstraint)
+            
+            NSLayoutConstraint.activate([
+                bg.topAnchor.constraint(equalTo: topAnchor),
+                bg.bottomAnchor.constraint(equalTo: bottomAnchor),
+                fg.topAnchor.constraint(equalTo: bg.topAnchor),
+                fg.bottomAnchor.constraint(equalTo: bg.bottomAnchor),
+                fg.leadingAnchor.constraint(equalTo: bg.leadingAnchor),
+                fgWidthConstraint
+            ])
+            
+            if i == 0 {
+                bg.leadingAnchor.constraint(equalTo: leadingAnchor).isActive = true
+            } else {
+                bg.leadingAnchor.constraint(equalTo: backgroundBars[i - 1].trailingAnchor, constant: spacing).isActive = true
+            }
+            
+            if i == totalSegments - 1 {
+                bg.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor).isActive = true
+            }
+            
+            bg.widthAnchor.constraint(equalTo: widthAnchor, multiplier: 1.0 / CGFloat(totalSegments), constant: -spacing).isActive = true
+        }
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        if hasDoneLayout {
-            return
-        }
-        let width = (frame.width - (padding * CGFloat(segments.count - 1)) ) / CGFloat(segments.count)
-        for (index, segment) in segments.enumerated() {
-            let segFrame = CGRect(x: CGFloat(index) * (width + padding), y: 0, width: width, height: frame.height)
-            segment.bottomSegmentView.frame = segFrame
-            segment.topSegmentView.frame = segFrame
-            segment.topSegmentView.frame.size.width = 0
-            
-            let cr = frame.height / 2
-            segment.bottomSegmentView.layer.cornerRadius = cr
-            segment.topSegmentView.layer.cornerRadius = cr
-        }
-        hasDoneLayout = true
-    }
-    
-    /// Starts the progress bar animation.
-    func startAnimation() {
-        layoutSubviews()
-        animate()
-    }
-    
-    private func animate(animationIndex: Int = 0) {
-        let nextSegment = segments[animationIndex]
-        currentAnimationIndex = animationIndex
-        self.isPaused = false
-        UIView.animate(withDuration: duration, delay: 0.0, options: .curveLinear, animations: {
-            nextSegment.topSegmentView.frame.size.width = nextSegment.bottomSegmentView.frame.width
-        }) { (finished) in
-            if !finished {
-                return
+        // Ensure layout is updated
+        resetAllSegments()
+        if currentIndex < totalSegments {
+            for i in 0..<currentIndex {
+                widthConstraints[i].constant = backgroundBars[i].bounds.width
             }
-            self.next()
         }
     }
     
-    private func updateColors() {
-        for segment in segments {
-            segment.topSegmentView.backgroundColor = topColor
-            segment.bottomSegmentView.backgroundColor = bottomColor
+    // MARK: - Controls
+    func startAnimation(at index: Int) {
+        guard index >= 0, index < totalSegments else { return }
+        currentIndex = index
+        resetAllSegments()
+        for i in 0..<currentIndex {
+            widthConstraints[i].constant = backgroundBars[i].bounds.width
         }
+        layoutIfNeeded()
+        animateSegment(at: currentIndex)
     }
     
-    private func next() {
-        let newIndex = self.currentAnimationIndex + 1
-        if newIndex < self.segments.count {
-            self.animate(animationIndex: newIndex)
-            self.delegate?.segmentedProgressBarChangedIndex(index: newIndex)
-        } else {
-            self.delegate?.segmentedProgressBarFinished()
-        }
+    private func animateSegment(at index: Int) {
+        guard index < foregroundBars.count else { return }
+        
+        let bar = foregroundBars[index]
+        bar.layer.removeAllAnimations()
+        widthConstraints[index].constant = backgroundBars[index].bounds.width
+        
+        UIView.animate(withDuration: duration, delay: 0, options: .curveLinear, animations: {
+            self.layoutIfNeeded()
+        }, completion: { [weak self] finished in
+            guard let self = self, finished else { return }
+            if index < self.totalSegments - 1 {
+                self.currentIndex += 1
+                self.delegate?.segmentedProgressBarChangedIndex(index: self.currentIndex)
+                self.animateSegment(at: self.currentIndex)
+            } else {
+                self.delegate?.segmentedProgressBarFinished()
+            }
+        })
     }
     
-    /// Skips the current segment and moves to the next one.
     func skip() {
-        let currentSegment = segments[currentAnimationIndex]
-        currentSegment.topSegmentView.frame.size.width = currentSegment.bottomSegmentView.frame.width
-        currentSegment.topSegmentView.layer.removeAllAnimations()
-        self.next()
+        guard currentIndex < foregroundBars.count else { return }
+        
+        foregroundBars[currentIndex].layer.removeAllAnimations()
+        widthConstraints[currentIndex].constant = backgroundBars[currentIndex].bounds.width
+        layoutIfNeeded()
+        
+        if currentIndex < totalSegments - 1 {
+            currentIndex += 1
+            delegate?.segmentedProgressBarChangedIndex(index: currentIndex)
+            animateSegment(at: currentIndex)
+        } else {
+            delegate?.segmentedProgressBarFinished()
+        }
     }
     
-    /// Rewinds to the previous segment.
     func rewind() {
-        let currentSegment = segments[currentAnimationIndex]
-        currentSegment.topSegmentView.layer.removeAllAnimations()
-        currentSegment.topSegmentView.frame.size.width = 0
-        let newIndex = max(currentAnimationIndex - 1, 0)
-        let prevSegment = segments[newIndex]
-        prevSegment.topSegmentView.frame.size.width = 0
-        self.animate(animationIndex: newIndex)
-        self.delegate?.segmentedProgressBarChangedIndex(index: newIndex)
+        guard currentIndex > 0 else { return }
+        
+        foregroundBars[currentIndex].layer.removeAllAnimations()
+        widthConstraints[currentIndex].constant = 0
+        currentIndex -= 1
+        widthConstraints[currentIndex].constant = 0
+        for i in (currentIndex + 1)..<totalSegments {
+            widthConstraints[i].constant = 0
+        }
+        layoutIfNeeded()
+        
+        delegate?.segmentedProgressBarChangedIndex(index: currentIndex)
+        animateSegment(at: currentIndex)
     }
-}
-
-/// A private class representing a single segment of the progress bar.
-fileprivate class Segment {
-    /// The view representing the unfilled portion of the segment.
-    let bottomSegmentView = UIView()
-    /// The view representing the filled portion of the segment.
-    let topSegmentView = UIView()
-    init() {
+    
+    private func resetAllSegments() {
+        for constraint in widthConstraints {
+            constraint.constant = 0
+        }
+        layoutIfNeeded()
     }
 }
